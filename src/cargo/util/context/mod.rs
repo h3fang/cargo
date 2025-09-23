@@ -1851,8 +1851,15 @@ impl GlobalContext {
     }
 
     pub fn build_config(&self) -> CargoResult<&CargoBuildConfig> {
-        self.build_config
-            .try_borrow_with(|| self.get::<CargoBuildConfig>("build"))
+        self.build_config.try_borrow_with(|| {
+            let mut cfg = self.get::<CargoBuildConfig>("build")?;
+            if cfg.build_std.as_ref().is_some_and(|v| v == "always")
+                && cfg.build_std_crates.is_none()
+            {
+                cfg.build_std_crates = Some(StringList(vec![]));
+            }
+            Ok(cfg)
+        })
     }
 
     pub fn progress_config(&self) -> &ProgressConfig {
@@ -2060,6 +2067,24 @@ impl GlobalContext {
 
     pub fn ws_roots(&self) -> MutexGuard<'_, HashMap<PathBuf, WorkspaceRootConfig>> {
         self.ws_roots.lock().unwrap()
+    }
+
+    /// build_std crates can be specified by:
+    /// - cli options (current unstable `-Zbuild-std`)
+    /// - cargo config.toml (with precedence from high to low)
+    ///     - `[target.<triple>]`
+    ///     - `[target.<cfg>]`
+    ///     - `[build]`
+    /// If none of them are specified, it will default to [None]
+    pub fn build_std_crates(&self) -> CargoResult<Option<&[String]>> {
+        let crates = if let Some(crates) = &self.cli_unstable().build_std {
+            Some(crates.as_slice())
+        } else if let Some(crates) = &self.build_config()?.build_std_crates {
+            Some(crates.as_slice())
+        } else {
+            None
+        };
+        Ok(crates)
     }
 }
 
@@ -2613,6 +2638,21 @@ impl<'de> Deserialize<'de> for JobsConfig {
     }
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub enum CargoBuildStdConfig {
+    #[default]
+    Never,
+    Always(BuildStdCrates),
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub enum BuildStdCrates {
+    #[default]
+    Std,
+    Core,
+    Alloc,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct CargoBuildConfig {
@@ -2638,6 +2678,8 @@ pub struct CargoBuildConfig {
     pub sbom: Option<bool>,
     /// Unstable feature `-Zbuild-analysis`.
     pub analysis: Option<CargoBuildAnalysis>,
+    pub build_std: Option<String>,
+    pub build_std_crates: Option<StringList>,
 }
 
 /// Metrics collection for build analysis.

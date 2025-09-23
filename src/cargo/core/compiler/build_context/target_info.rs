@@ -307,8 +307,8 @@ impl TargetInfo {
             // The '--print=target-spec-json' is an unstable option of rustc, therefore only
             // try to fetch this information if rustc allows nightly features. Additionally,
             // to avoid making two rustc queries when not required, only try to fetch the
-            // target-spec when the '-Zbuild-std' option is passed.
-            if gctx.cli_unstable().build_std.is_some() {
+            // target-spec when 'build-std' is enabled.
+            if gctx.build_std_crates()?.is_some() {
                 let mut target_spec_process = rustc.workspace_process();
                 apply_env_config(gctx, &mut target_spec_process)?;
                 target_spec_process

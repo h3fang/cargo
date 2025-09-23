@@ -168,13 +168,13 @@ trait BuildStd: Sized {
 impl BuildStd for Execs {
     fn build_std(&mut self, setup: &Setup) -> &mut Self {
         enable_build_std(self, setup);
-        self.arg("-Zbuild-std");
+        // self.arg("-Zbuild-std");
         self
     }
 
-    fn build_std_arg(&mut self, setup: &Setup, arg: &str) -> &mut Self {
+    fn build_std_arg(&mut self, setup: &Setup, _arg: &str) -> &mut Self {
         enable_build_std(self, setup);
-        self.arg(format!("-Zbuild-std={}", arg));
+        // self.arg(format!("-Zbuild-std={}", arg));
         self
     }
 
@@ -184,11 +184,39 @@ impl BuildStd for Execs {
     }
 }
 
+trait ConfigBuildStd: Sized {
+    fn config_build_std(self, crates: &[&str]) -> Self;
+}
+
+impl ConfigBuildStd for ProjectBuilder {
+    fn config_build_std(self, crates: &[&str]) -> Self {
+        let mut body = r#"
+                    [build]
+                    build-std = "always"
+                "#
+        .to_string();
+
+        if !crates.is_empty() {
+            let mut joined = String::new();
+            for c in crates {
+                if !joined.is_empty() {
+                    joined.push_str(", ");
+                }
+                joined.push_str(&format!("\"{c}\""));
+            }
+            body.push_str(&format!("\nbuild-std-crates = [{joined}]"));
+        }
+
+        self.file(".cargo/config.toml", &body)
+    }
+}
+
 #[cargo_test(build_std_mock)]
 fn basic() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "src/main.rs",
             "
@@ -250,6 +278,7 @@ fn shared_std_dependency_rebuild() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let setup = setup();
     let p = project()
+        .config_build_std(&[])
         .file(
             "Cargo.toml",
             format!(
@@ -312,7 +341,10 @@ fn shared_std_dependency_rebuild() {
 fn simple_lib_std() {
     let setup = setup();
 
-    let p = project().file("src/lib.rs", "").build();
+    let p = project()
+        .config_build_std(&[])
+        .file("src/lib.rs", "")
+        .build();
     p.cargo("build -v")
         .build_std(&setup)
         .target_host()
@@ -339,7 +371,10 @@ fn simple_lib_std() {
 fn simple_bin_std() {
     let setup = setup();
 
-    let p = project().file("src/main.rs", "fn main() {}").build();
+    let p = project()
+        .config_build_std(&[])
+        .file("src/main.rs", "fn main() {}")
+        .build();
     p.cargo("run -v").build_std(&setup).target_host().run();
 }
 
@@ -348,6 +383,7 @@ fn lib_nostd() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&["core"])
         .file(
             "src/lib.rs",
             r#"
@@ -370,6 +406,7 @@ fn check_core() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&["core"])
         .file("src/lib.rs", "#![no_std] fn unused_fn() {}")
         .build();
 
@@ -394,6 +431,7 @@ fn build_std_with_no_arg_for_core_only_target() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "src/lib.rs",
             r#"
@@ -484,6 +522,7 @@ fn depend_same_as_std() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "src/lib.rs",
             r#"
@@ -518,6 +557,7 @@ fn test() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "src/lib.rs",
             r#"
@@ -551,6 +591,7 @@ fn target_proc_macro() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "src/lib.rs",
             r#"
@@ -570,6 +611,7 @@ fn bench() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "src/lib.rs",
             r#"
@@ -592,6 +634,7 @@ fn doc() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "src/lib.rs",
             r#"
@@ -609,6 +652,7 @@ fn check_std() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "src/lib.rs",
             "
@@ -645,6 +689,7 @@ fn doctest() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "src/lib.rs",
             r#"
@@ -678,6 +723,7 @@ fn no_implicit_alloc() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "src/lib.rs",
             r#"
@@ -710,6 +756,7 @@ fn macro_expanded_shadow() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "src/lib.rs",
             r#"
@@ -731,7 +778,10 @@ fn ignores_incremental() {
     // any other crate.
     let setup = setup();
 
-    let p = project().file("src/lib.rs", "").build();
+    let p = project()
+        .config_build_std(&[])
+        .file("src/lib.rs", "")
+        .build();
     p.cargo("build")
         .env("CARGO_INCREMENTAL", "1")
         .build_std(&setup)
@@ -757,6 +807,7 @@ fn cargo_config_injects_compiler_builtins() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&["core"])
         .file(
             "src/lib.rs",
             r#"
@@ -764,13 +815,6 @@ fn cargo_config_injects_compiler_builtins() {
                 pub fn foo() {
                     assert_eq!(u8::MIN, 0);
                 }
-            "#,
-        )
-        .file(
-            ".cargo/config.toml",
-            r#"
-                [unstable]
-                build-std = ['core']
             "#,
         )
         .build();
@@ -787,6 +831,7 @@ fn different_features() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "src/lib.rs",
             "
@@ -808,7 +853,10 @@ fn no_roots() {
     // Checks for a bug where it would panic if there are no roots.
     let setup = setup();
 
-    let p = project().file("tests/t1.rs", "").build();
+    let p = project()
+        .config_build_std(&[])
+        .file("tests/t1.rs", "")
+        .build();
     p.cargo("build")
         .build_std(&setup)
         .target_host()
@@ -826,6 +874,7 @@ fn proc_macro_only() {
     let setup = setup();
 
     let p = project()
+        .config_build_std(&[])
         .file(
             "Cargo.toml",
             r#"
@@ -854,7 +903,10 @@ fn proc_macro_only() {
 fn fetch() {
     let setup = setup();
 
-    let p = project().file("src/main.rs", "fn main() {}").build();
+    let p = project()
+        .config_build_std(&[])
+        .file("src/main.rs", "fn main() {}")
+        .build();
     p.cargo("fetch")
         .build_std(&setup)
         .target_host()

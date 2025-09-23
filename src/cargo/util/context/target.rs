@@ -19,6 +19,8 @@ pub struct TargetCfgConfig {
     // `cfg(` or not.
     #[serde(flatten)]
     pub other: BTreeMap<String, toml::Value>,
+    pub build_std: Option<String>,
+    pub build_std_crates: Option<StringList>,
 }
 
 /// Config definition of a `[target]` table or `[host]`.
@@ -38,6 +40,8 @@ pub struct TargetConfig {
     /// running its build script and instead use the given output from the
     /// config file.
     pub links_overrides: Rc<BTreeMap<String, BuildOutput>>,
+    pub build_std: Option<String>,
+    pub build_std_crates: Option<StringList>,
 }
 
 /// Loads all of the `target.'cfg()'` tables.
@@ -131,12 +135,20 @@ fn load_config_table(gctx: &GlobalContext, prefix: &str) -> CargoResult<TargetCo
         Some(links) => parse_links_overrides(&target_key, links.val)?,
         None => BTreeMap::new(),
     };
+    let build_std: Option<String> = gctx.get(&format!("{prefix}.build_std"))?;
+    let mut build_std_crates: Option<StringList> =
+        gctx.get(&format!("{prefix}.build_std_crates"))?;
+    if build_std.as_ref().is_some_and(|v| v == "always") && build_std_crates.is_none() {
+        build_std_crates = Some(StringList(vec![]));
+    }
     Ok(TargetConfig {
         runner,
         rustflags,
         rustdocflags,
         linker,
         links_overrides: Rc::new(links_overrides),
+        build_std,
+        build_std_crates,
     })
 }
 

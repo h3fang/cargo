@@ -65,8 +65,8 @@ pub fn fetch<'a>(
         deps_to_fetch.extend(deps);
     }
 
-    // If -Zbuild-std was passed, download dependencies for the standard library.
-    if let Some(crates) = &gctx.cli_unstable().build_std {
+    // If 'build-std' was configured, download dependencies for the standard library.
+    if let Some(crates) = gctx.build_std_crates()? {
         let (std_package_set, _, _) = standard_lib::resolve_std(
             ws,
             &mut data,

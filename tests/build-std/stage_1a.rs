@@ -20,9 +20,8 @@
 
 #![allow(clippy::disallowed_methods)]
 
-mod stage_1a;
-
 use cargo_test_support::Execs;
+use cargo_test_support::ProjectBuilder;
 use cargo_test_support::basic_manifest;
 use cargo_test_support::paths;
 use cargo_test_support::project;
@@ -33,18 +32,13 @@ use cargo_test_support::{Project, prelude::*};
 use std::env;
 use std::path::{Path, PathBuf};
 
-fn enable_build_std(e: &mut Execs, arg: Option<&str>, isolated: bool) {
+fn enable_build_std(e: &mut Execs, isolated: bool) {
     if !isolated {
         e.env_remove("CARGO_HOME");
         e.env_remove("HOME");
     }
 
-    // And finally actually enable `build-std` for now
-    let arg = match arg {
-        Some(s) => format!("-Zbuild-std={}", s),
-        None => "-Zbuild-std".to_string(),
-    };
-    e.arg(arg).arg("-Zpublic-dependency");
+    e.arg("-Zpublic-dependency");
     e.masquerade_as_nightly_cargo(&["build-std"]);
 }
 
@@ -60,9 +54,6 @@ trait BuildStd: Sized {
     /// tests concurrently.
     fn build_std(&mut self) -> &mut Self;
 
-    /// Like [`BuildStd::build_std`] and is able to specify what crates to build.
-    fn build_std_arg(&mut self, arg: &str) -> &mut Self;
-
     /// Like [`BuildStd::build_std`] but use an isolated `CARGO_HOME` environment
     /// to avoid package cache lock contention.
     ///
@@ -74,17 +65,12 @@ trait BuildStd: Sized {
 
 impl BuildStd for Execs {
     fn build_std(&mut self) -> &mut Self {
-        enable_build_std(self, None, false);
-        self
-    }
-
-    fn build_std_arg(&mut self, arg: &str) -> &mut Self {
-        enable_build_std(self, Some(arg), false);
+        enable_build_std(self, false);
         self
     }
 
     fn build_std_isolated(&mut self) -> &mut Self {
-        enable_build_std(self, None, true);
+        enable_build_std(self, true);
         self
     }
 
@@ -94,9 +80,45 @@ impl BuildStd for Execs {
     }
 }
 
+trait BuildStdConfig: Sized {
+    fn build_std(self) -> Self;
+    fn build_std_crates(self, crates: &[&str]) -> Self;
+}
+
+impl BuildStdConfig for ProjectBuilder {
+    fn build_std(self) -> Self {
+        self.file(
+            ".cargo/config.toml",
+            r#"
+            [build]
+            build-std = "always"
+        "#,
+        )
+    }
+
+    fn build_std_crates(self, crates: &[&str]) -> Self {
+        let mut array = String::new();
+        for c in crates {
+            array.push_str(&format!("\"{c}\", "));
+        }
+        array.pop();
+        array.pop();
+        self.file(
+            ".cargo/config.toml",
+            &r#"
+            [build]
+            build-std = "always"
+            build-std-crates = [__CRATES__]
+        "#
+            .replace("__CRATES__", &array),
+        )
+    }
+}
+
 #[cargo_test(build_std_real)]
 fn basic() {
     let p = project()
+        .build_std()
         .file(
             "src/main.rs",
             "
@@ -192,6 +214,7 @@ fn basic() {
 #[cargo_test(build_std_real)]
 fn host_proc_macro() {
     let p = project()
+        .build_std_crates(&["std", "proc_macro"])
         .file(
             "Cargo.toml",
             r#"
@@ -243,15 +266,13 @@ fn host_proc_macro() {
         )
         .build();
 
-    p.cargo("build")
-        .build_std_arg("std")
-        .build_std_arg("proc_macro")
-        .run();
+    p.cargo("build").build_std().run();
 }
 
 #[cargo_test(build_std_real)]
 fn cross_custom() {
     let p = project()
+        .build_std_crates(&["core"])
         .file(
             "Cargo.toml",
             r#"
@@ -274,13 +295,14 @@ fn cross_custom() {
         .build();
 
     p.cargo("build --target custom-target.json -v")
-        .build_std_arg("core")
+        .build_std()
         .run();
 }
 
 #[cargo_test(build_std_real)]
 fn custom_test_framework() {
     let p = project()
+        .build_std_crates(&["core"])
         .file(
             "src/lib.rs",
             r#"
@@ -314,8 +336,8 @@ fn custom_test_framework() {
     let new_path = env::join_paths(paths).unwrap();
 
     p.cargo("test --target target.json --no-run -v")
+        .build_std()
         .env("PATH", new_path)
-        .build_std_arg("core")
         .run();
 }
 
@@ -326,6 +348,7 @@ fn custom_test_framework() {
 #[cfg(target_os = "linux")]
 fn remap_path_scope() {
     let p = project()
+        .build_std()
         .file(
             "src/main.rs",
             "
@@ -370,6 +393,8 @@ fn remap_path_scope() {
 fn test_proc_macro() {
     // See rust-lang/cargo#14735
     let p = project()
+        .build_std()
+        .build_std()
         .file(
             "Cargo.toml",
             r#"
@@ -398,11 +423,10 @@ fn test_proc_macro() {
 }
 
 #[cargo_test(build_std_real)]
-fn default_features_still_included_with_extra_build_std_features() {
-    // This is a regression test to ensure when adding extra `build-std-features`,
-    // the default feature set is still respected and included.
+fn test_panic_abort() {
     // See rust-lang/cargo#14935
     let p = project()
+        .build_std_crates(&["std", "panic_abort"])
         .file(
             "Cargo.toml",
             r#"
@@ -415,9 +439,9 @@ fn default_features_still_included_with_extra_build_std_features() {
         .build();
 
     p.cargo("check")
-        .build_std_arg("std,panic_abort")
         .env("RUSTFLAGS", "-C panic=abort")
-        .arg("-Zbuild-std-features=optimize_for_size")
+        .build_std()
+        .arg("-Zbuild-std-features=panic_immediate_abort")
         .run();
 }
 
